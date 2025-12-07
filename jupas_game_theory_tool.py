@@ -6,9 +6,8 @@ st.title("JUPAS Game Theory: MSE Analysis for Heterogeneous Groups")
 # --- Input Section ---
 st.header("Input Parameters")
 
-N = st.number_input("Total number of students (N)", min_value=1, value=10000)
-num_group_A = st.number_input("Number of Group A students", min_value=0, max_value=N, value=3000)
-num_group_B = N - num_group_A
+num_group_A = st.number_input("Number of Group A students", min_value=0, value=3000)
+num_group_B = st.number_input("Number of Group B students", min_value=0, value=7000)
 
 seats_type_A = st.number_input("Seats in Type A", min_value=0, value=3000)
 seats_type_B = st.number_input("Seats in Type B", min_value=0, value=4200)
@@ -100,13 +99,6 @@ st.markdown("""
 - The sum of fractions is 1 (all Group B students are allocated between Type B and C).
 - If the value of Type B is much higher than Type C, all Group B students will choose Type B.
 - If the value of Type B is close to Type C, some will choose Type C for a safer seat.
-""")
-
-# --- Comparison with Your Document's Example ---
-st.header("Comparison with Document Example (if values match)")
-
-st.markdown("""
-If you set the seat numbers and values as in your document, the results above should match the theoretical MSE fractions and payoffs you derived.
 """)
 
 st.markdown("---")
