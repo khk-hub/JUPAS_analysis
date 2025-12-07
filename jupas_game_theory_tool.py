@@ -1,598 +1,347 @@
+import streamlit as st
 import numpy as np
-from typing import Dict, Tuple, Optional, List
-import matplotlib.pyplot as plt
 
-class JUPASAnalyzer:
-    """
-    A tool for analyzing JUPAS competition scenarios based on game theory.
-    Implements the analysis flow from Situations 4 and 5 of the paper.
-    """
+# Initialize session state for parameters
+if 'params' not in st.session_state:
+    st.session_state.params = {
+        'N': 10000,
+        'S': 9000,
+        'group_A_prop': 0.3,
+        'V_A': 3.0,
+        'V_B': 2.0,
+        'V_C': 1.0,
+        'seat_prop_A': 1/3,
+        'seat_prop_B': 1/3,
+        'seat_prop_C': 1/3
+    }
+
+st.title("JUPAS Competition Analyzer")
+st.markdown("Analyze game-theoretic equilibrium in JUPAS-style admissions")
+
+# Sidebar for parameter inputs
+with st.sidebar:
+    st.header("Parameters")
     
-    def __init__(self):
-        """Initialize the analyzer with default parameters."""
-        self.reset_parameters()
+    # Basic parameters
+    N = st.number_input("Total Applicants (N)", min_value=1000, max_value=50000, 
+                       value=st.session_state.params['N'], step=1000)
+    S = st.number_input("Total Seats (S)", min_value=100, max_value=50000, 
+                       value=st.session_state.params['S'], step=100)
     
-    def reset_parameters(self):
-        """Reset all parameters to default values."""
-        # Default parameters (can be customized)
-        self.N = 10000  # Total number of applicants
-        self.S = 9000   # Total number of seats
-        
-        # Group proportions
-        self.group_A_prop = 0.3  # Top 30% (More Competitive)
-        self.group_B_prop = 0.7  # Remaining 70% (Less Competitive)
-        
-        # Programme values
-        self.V_A = 3.0  # Value of Type A programmes
-        self.V_B = 2.0  # Value of Type B programmes
-        self.V_C = 1.0  # Value of Type C programmes
-        
-        # Seat distribution proportions across programme types
-        self.seat_prop_A = 1/3  # Proportion of seats in Type A
-        self.seat_prop_B = 1/3  # Proportion of seats in Type B
-        self.seat_prop_C = 1/3  # Proportion of seats in Type C
-        
-        # Programme size distribution within each type (for mixed strategy analysis)
-        self.prog_sizes = [20, 50, 100]  # Different programme capacities
-        self.size_dist_A = [0.4, 0.4, 0.2]  # Distribution for Type A
-        self.size_dist_B = [0.4, 0.4, 0.2]  # Distribution for Type B
-        self.size_dist_C = [0.4, 0.4, 0.2]  # Distribution for Type C
-        
-        # Derived quantities
-        self._calculate_derived_quantities()
+    # Group proportion
+    group_A_prop = st.slider("Group A Proportion (More Competitive)", 
+                            min_value=0.1, max_value=0.5, 
+                            value=float(st.session_state.params['group_A_prop']), 
+                            step=0.05)
     
-    def _calculate_derived_quantities(self):
-        """Calculate derived quantities from current parameters."""
-        # Group sizes
-        self.n_A = int(self.N * self.group_A_prop)
-        self.n_B = self.N - self.n_A
-        
-        # Seat counts by type
-        self.S_A = int(self.S * self.seat_prop_A)
-        self.S_B = int(self.S * self.seat_prop_B)
-        self.S_C = self.S - self.S_A - self.S_B
-        
-        # Validate value ordering
-        if not (self.V_A > self.V_B > self.V_C):
-            raise ValueError("Programme values must satisfy: V_A > V_B > V_C")
-        
-        # Validate proportions sum to 1
-        if abs(self.seat_prop_A + self.seat_prop_B + self.seat_prop_C - 1) > 0.01:
-            raise ValueError("Seat proportions must sum to 1")
+    # Programme values
+    st.subheader("Programme Values")
+    V_A = st.number_input("Value of Type A", min_value=1.0, max_value=10.0, 
+                         value=float(st.session_state.params['V_A']), step=0.1)
+    V_B = st.number_input("Value of Type B", min_value=0.1, max_value=10.0, 
+                         value=float(st.session_state.params['V_B']), step=0.1)
+    V_C = st.number_input("Value of Type C", min_value=0.1, max_value=10.0, 
+                         value=float(st.session_state.params['V_C']), step=0.1)
     
-    def set_parameters(self, **kwargs):
-        """Set custom parameters for the analysis."""
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
-                raise ValueError(f"Unknown parameter: {key}")
-        
-        self._calculate_derived_quantities()
+    # Seat distribution
+    st.subheader("Seat Distribution")
+    seat_prop_A = st.slider("Proportion of seats in Type A", 
+                           min_value=0.0, max_value=1.0, 
+                           value=float(st.session_state.params['seat_prop_A']), step=0.05)
+    seat_prop_B = st.slider("Proportion of seats in Type B", 
+                           min_value=0.0, max_value=1.0, 
+                           value=float(st.session_state.params['seat_prop_B']), step=0.05)
+    seat_prop_C = 1.0 - seat_prop_A - seat_prop_B
+    st.markdown(f"**Proportion of seats in Type C:** {seat_prop_C:.2f}")
     
-    def analyze_group_A(self) -> Dict:
-        """
-        Step 1: Analyze Group A (More Competitive) strategy.
+    if seat_prop_C < 0:
+        st.error("Seat proportions must sum to 1 or less!")
+    
+    # Update session state
+    st.session_state.params.update({
+        'N': N, 'S': S, 'group_A_prop': group_A_prop,
+        'V_A': V_A, 'V_B': V_B, 'V_C': V_C,
+        'seat_prop_A': seat_prop_A, 'seat_prop_B': seat_prop_B, 'seat_prop_C': seat_prop_C
+    })
+
+# Main analysis function
+def analyze_jupas(N, S, group_A_prop, V_A, V_B, V_C, seat_prop_A, seat_prop_B, seat_prop_C):
+    """Core analysis function following the paper's logic."""
+    
+    # Derived quantities
+    n_A = int(N * group_A_prop)
+    n_B = N - n_A
+    
+    S_A = int(S * seat_prop_A)
+    S_B = int(S * seat_prop_B)
+    S_C = int(S * seat_prop_C)
+    
+    # Validate value ordering
+    if not (V_A > V_B > V_C):
+        st.error("Programme values must satisfy: V_A > V_B > V_C")
+        return None
+    
+    results = {}
+    
+    # Step 1: Group A Analysis
+    st.header("Step 1: Group A Analysis")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Group A Applicants", f"{n_A:,}")
+        st.metric("Type A Seats", f"{S_A:,}")
+    
+    if n_A <= S_A:
+        admission_rate_A = 1.0
+        expected_payoff_A = V_A
+        status = "✅ All Group A can be admitted to Type A"
+    else:
+        admission_rate_A = S_A / n_A
+        expected_payoff_A = admission_rate_A * V_A
+        status = f"⚠️ Only {admission_rate_A:.1%} of Group A can be admitted to Type A"
+    
+    with col2:
+        st.metric("Admission Rate", f"{admission_rate_A:.1%}")
+        st.metric("Expected Payoff", f"{expected_payoff_A:.2f}")
+    
+    st.info(status)
+    results['group_A'] = {'admission_rate': admission_rate_A, 'expected_payoff': expected_payoff_A}
+    
+    # Step 2: Group B Analysis
+    st.header("Step 2: Group B Analysis")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Group B Applicants", f"{n_B:,}")
+        st.metric("Type B Seats", f"{S_B:,}")
+        st.metric("Type C Seats", f"{S_C:,}")
+    
+    # Calculate K = V_B / V_C
+    K = V_B / V_C
+    K_lower = 0.75  # 3/4
+    K_upper = 4/3   # ~1.333
+    
+    with col2:
+        st.metric("K = V_B/V_C", f"{K:.3f}")
+        st.metric("MSE Range", f"({K_lower:.3f}, {K_upper:.3f})")
+    
+    # Check MSE condition
+    st.subheader("Mixed Strategy Equilibrium (MSE) Analysis")
+    
+    if K_lower < K < K_upper:
+        st.success(f"✅ MSE EXISTS (K = {K:.3f} is within range)")
         
-        Returns:
-            Dictionary containing Group A analysis results
-        """
-        results = {}
+        # Calculate equilibrium fraction f
+        f = K / (1 + K)
         
-        # Check if Group A can occupy all Type A seats
-        if self.n_A <= self.S_A:
-            # Enough Type A seats for all Group A
-            results['occupancy'] = 'complete'
-            results['admission_rate'] = 1.0
-            results['expected_payoff'] = self.V_A
-            
-            # Mixed strategy across programme sizes
-            mixed_strategy = []
-            for i, size in enumerate(self.prog_sizes):
-                # Calculate number of programmes of this size
-                n_progs = int(self.S_A * self.size_dist_A[i] / size)
-                if n_progs > 0:
-                    admission_prob = 1.0  # Guaranteed admission for Group A
-                    expected_payoff = admission_prob * self.V_A
-                    mixed_strategy.append({
-                        'programme_type': 'A',
-                        'size': size,
-                        'probability': self.size_dist_A[i],
-                        'admission_prob': admission_prob,
-                        'expected_payoff': expected_payoff
-                    })
-            
-            results['mixed_strategy'] = mixed_strategy
-            results['all_admitted'] = True
-            
+        # Apply probability constraints
+        f_min = S_B / n_B if S_B < n_B else 0
+        f_max = 1 - (S_C / n_B) if S_C < n_B * (1 - f) else 1
+        
+        # Adjust f to stay within constraints
+        f = max(f_min, min(f, f_max))
+        
+        # Calculate admission probabilities
+        P_B = S_B / (n_B * f) if f > 0 else 0
+        P_C = S_C / (n_B * (1 - f)) if f < 1 else 0
+        
+        # Cap probabilities at 1
+        P_B = min(P_B, 1.0)
+        P_C = min(P_C, 1.0)
+        
+        # Calculate expected payoffs
+        E_B = P_B * V_B
+        E_C = P_C * V_C
+        
+        # Display results
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Equilibrium f", f"{f:.3f}")
+            st.caption("Fraction choosing Type B")
+        with col2:
+            st.metric("P(B)", f"{P_B:.3f}")
+            st.caption("Admission prob Type B")
+        with col3:
+            st.metric("P(C)", f"{P_C:.3f}")
+            st.caption("Admission prob Type C")
+        
+        st.markdown(f"**Expected Payoffs:**")
+        st.markdown(f"- Type B: E(B) = {P_B:.3f} × {V_B:.1f} = **{E_B:.3f}**")
+        st.markdown(f"- Type C: E(C) = {P_C:.3f} × {V_C:.1f} = **{E_C:.3f}**")
+        
+        if abs(E_B - E_C) < 0.001:
+            st.success("✅ Indifference condition holds (E_B ≈ E_C)")
         else:
-            # Not enough Type A seats for all Group A
-            results['occupancy'] = 'partial'
-            results['admission_rate'] = self.S_A / self.n_A
-            results['expected_payoff'] = results['admission_rate'] * self.V_A
-            results['all_admitted'] = False
+            st.warning(f"⚠️ Small deviation: Δ = {abs(E_B - E_C):.4f}")
         
-        return results
-    
-    def analyze_group_B_mse_condition(self) -> Dict:
-        """
-        Step 2: Analyze Mixed Strategy Equilibrium (MSE) condition for Group B.
-        Based on Situation 5 analysis with variable K.
-        
-        Returns:
-            Dictionary containing MSE analysis results
-        """
-        results = {}
-        
-        # Calculate effective K (relative value of Type B vs Type C)
-        K = self.V_B / self.V_C  # This is the K from Situation 5
-        
-        # Calculate the range for MSE existence (from Situation 5 analysis)
-        K_lower = 0.75  # 3/4
-        K_upper = 4/3   # approximately 1.333
-        
-        results['K'] = K
-        results['K_lower'] = K_lower
-        results['K_upper'] = K_upper
-        results['mse_exists'] = K_lower < K < K_upper
-        
-        if results['mse_exists']:
-            # Calculate equilibrium fraction f (from Situation 5)
-            f = K / (1 + K)  # This is the equilibrium fraction choosing Type B
-            
-            # Ensure f is within feasible range considering capacity constraints
-            # Capacity constraints: f must satisfy P_B <= 1 and P_C <= 1
-            P_B = self.S_B / (self.n_B * f) if f > 0 else float('inf')
-            P_C = self.S_C / (self.n_B * (1 - f)) if f < 1 else float('inf')
-            
-            # Adjust f if probability constraints are violated
-            if P_B > 1:
-                f_min = self.S_B / self.n_B
-                f = max(f, f_min)
-            if P_C > 1:
-                f_max = 1 - (self.S_C / self.n_B)
-                f = min(f, f_max)
-            
-            results['f_equilibrium'] = f
-            results['P_B'] = self.S_B / (self.n_B * f) if f > 0 else 0
-            results['P_C'] = self.S_C / (self.n_B * (1 - f)) if f < 1 else 0
-            
-            # Expected payoffs
-            results['E_B'] = results['P_B'] * self.V_B
-            results['E_C'] = results['P_C'] * self.V_C
-            
-            # Check if indifference condition holds
-            results['indifference_holds'] = abs(results['E_B'] - results['E_C']) < 0.001
-        
-        return results
-    
-    def analyze_group_B_corner_solution(self) -> Dict:
-        """
-        Analyze Group B corner solution when MSE doesn't exist.
-        Based on Situation 4 analysis.
-        
-        Returns:
-            Dictionary containing corner solution analysis
-        """
-        results = {}
-        
-        # Symmetric move analysis (all choose same type)
-        # If all choose Type B
-        P_B_all = min(1.0, self.S_B / self.n_B)
-        E_B_all = P_B_all * self.V_B
-        
-        # If all choose Type C
-        P_C_all = min(1.0, self.S_C / self.n_B)
-        E_C_all = P_C_all * self.V_C
-        
-        # Determine which corner solution is better
-        results['P_B_symmetric'] = P_B_all
-        results['E_B_symmetric'] = E_B_all
-        results['P_C_symmetric'] = P_C_all
-        results['E_C_symmetric'] = E_C_all
-        
-        if E_B_all > E_C_all:
-            results['preferred_corner'] = 'Type B'
-            results['equilibrium_type'] = 'corner_B'
-            results['admission_rate'] = P_B_all
-            results['expected_payoff'] = E_B_all
-        elif E_C_all > E_B_all:
-            results['preferred_corner'] = 'Type C'
-            results['equilibrium_type'] = 'corner_C'
-            results['admission_rate'] = P_C_all
-            results['expected_payoff'] = E_C_all
-        else:
-            results['preferred_corner'] = 'indifferent'
-            results['equilibrium_type'] = 'multiple_corners'
-            results['admission_rate'] = P_B_all  # Both equal
-            results['expected_payoff'] = E_B_all
-        
-        # Asymmetric move analysis
-        results['threshold_analysis'] = self._analyze_asymmetric_threshold()
-        
-        return results
-    
-    def _analyze_asymmetric_threshold(self) -> Dict:
-        """
-        Analyze the condition for rational switching to Type C.
-        From Situation 4 analysis.
-        """
-        results = {}
-        
-        # The condition: P_C > 2 * P_B (when V_B = 2, V_C = 1)
-        # Generalized: P_C > (V_B / V_C) * P_B
-        
-        threshold_ratio = self.V_B / self.V_C
-        
-        # Find x (number switching to C) that satisfies the condition
-        # We'll find if there exists any x such that the condition holds
-        
-        # Check boundary conditions
-        # When x is very small (almost no one in C)
-        x_small = 1
-        P_B_small = min(1.0, self.S_B / (self.n_B - x_small))
-        P_C_small = min(1.0, self.S_C / x_small)
-        condition_small = P_C_small > threshold_ratio * P_B_small
-        
-        # When x is half
-        x_half = self.n_B // 2
-        P_B_half = min(1.0, self.S_B / (self.n_B - x_half))
-        P_C_half = min(1.0, self.S_C / x_half)
-        condition_half = P_C_half > threshold_ratio * P_B_half
-        
-        results['threshold_ratio'] = threshold_ratio
-        results['condition_small_x'] = condition_small
-        results['condition_half_x'] = condition_half
-        results['hard_to_achieve'] = not (condition_small or condition_half)
-        
-        return results
-    
-    def suggest_value_adjustment(self, current_K: float) -> Dict:
-        """
-        Suggest how to adjust programme values to achieve MSE.
-        
-        Args:
-            current_K: Current K value (V_B / V_C)
-            
-        Returns:
-            Dictionary with adjustment suggestions
-        """
-        suggestions = {}
-        K_lower = 0.75
-        K_upper = 4/3
-        
-        if current_K <= K_lower:
-            suggestions['issue'] = 'K too low for MSE'
-            suggestions['current_range'] = f"K = {current_K:.3f} ≤ {K_lower}"
-            suggestions['suggestion'] = f"Increase V_B or decrease V_C to achieve K > {K_lower}"
-            suggestions['target_K'] = (K_lower + K_upper) / 2  # Target middle of range
-            
-        elif current_K >= K_upper:
-            suggestions['issue'] = 'K too high for MSE'
-            suggestions['current_range'] = f"K = {current_K:.3f} ≥ {K_upper}"
-            suggestions['suggestion'] = f"Decrease V_B or increase V_C to achieve K < {K_upper}"
-            suggestions['target_K'] = (K_lower + K_upper) / 2  # Target middle of range
-            
-        else:
-            suggestions['issue'] = 'MSE exists'
-            suggestions['current_range'] = f"{K_lower} < K = {current_K:.3f} < {K_upper}"
-            suggestions['suggestion'] = "No adjustment needed for MSE"
-            suggestions['target_K'] = current_K
-        
-        return suggestions
-    
-    def full_analysis(self) -> Dict:
-        """
-        Perform complete analysis following the paper's flow.
-        
-        Returns:
-            Comprehensive analysis results
-        """
-        print("=" * 60)
-        print("JUPAS COMPETITION ANALYSIS TOOL")
-        print("=" * 60)
-        print(f"\nParameters:")
-        print(f"  Total Applicants (N): {self.N:,}")
-        print(f"  Total Seats (S): {self.S:,}")
-        print(f"  Group A (Top {self.group_A_prop*100:.0f}%): {self.n_A:,}")
-        print(f"  Group B (Remaining {self.group_B_prop*100:.0f}%): {self.n_B:,}")
-        print(f"  Programme Values: A={self.V_A}, B={self.V_B}, C={self.V_C}")
-        print(f"  Seat Distribution: A={self.seat_prop_A:.1%}, B={self.seat_prop_B:.1%}, C={self.seat_prop_C:.1%}")
-        
-        # Step 1: Group A analysis
-        print("\n" + "=" * 60)
-        print("STEP 1: GROUP A ANALYSIS (More Competitive)")
-        print("=" * 60)
-        group_A_results = self.analyze_group_A()
-        
-        print(f"\nGroup A Statistics:")
-        print(f"  Number of applicants: {self.n_A:,}")
-        print(f"  Type A seats available: {self.S_A:,}")
-        
-        if group_A_results['all_admitted']:
-            print(f"  ✅ All Group A applicants can be admitted to Type A programmes")
-            print(f"  Admission rate: {group_A_results['admission_rate']:.1%}")
-            print(f"  Expected payoff: {group_A_results['expected_payoff']:.3f}")
-        else:
-            print(f"  ⚠️  Not enough Type A seats for all Group A applicants")
-            print(f"  Admission rate: {group_A_results['admission_rate']:.1%}")
-            print(f"  Expected payoff: {group_A_results['expected_payoff']:.3f}")
-        
-        # Step 2: Group B analysis
-        print("\n" + "=" * 60)
-        print("STEP 2: GROUP B ANALYSIS (Less Competitive)")
-        print("=" * 60)
-        
-        # First check MSE condition
-        mse_analysis = self.analyze_group_B_mse_condition()
-        
-        print(f"\nMixed Strategy Equilibrium (MSE) Analysis:")
-        print(f"  K = V_B / V_C = {self.V_B:.2f} / {self.V_C:.2f} = {mse_analysis['K']:.3f}")
-        print(f"  MSE exists when: {mse_analysis['K_lower']:.3f} < K < {mse_analysis['K_upper']:.3f}")
-        
-        if mse_analysis['mse_exists']:
-            print(f"  ✅ MSE EXISTS for current parameters")
-            print(f"  Equilibrium fraction choosing Type B (f): {mse_analysis['f_equilibrium']:.3f}")
-            print(f"  Admission probability - Type B: {mse_analysis['P_B']:.3f}")
-            print(f"  Admission probability - Type C: {mse_analysis['P_C']:.3f}")
-            print(f"  Expected payoff - Type B: {mse_analysis['E_B']:.3f}")
-            print(f"  Expected payoff - Type C: {mse_analysis['E_C']:.3f}")
-            
-            if mse_analysis['indifference_holds']:
-                print(f"  ✅ Indifference condition holds (E_B ≈ E_C)")
-            else:
-                print(f"  ⚠️  Small deviation from indifference: Δ = {abs(mse_analysis['E_B'] - mse_analysis['E_C']):.4f}")
-            
-            equilibrium_type = "MSE"
-            
-        else:
-            print(f"  ❌ MSE DOES NOT EXIST for current parameters")
-            print(f"  K = {mse_analysis['K']:.3f} is outside the range ({mse_analysis['K_lower']:.3f}, {mse_analysis['K_upper']:.3f})")
-            
-            # Analyze corner solution
-            corner_analysis = self.analyze_group_B_corner_solution()
-            
-            print(f"\nCorner Solution Analysis:")
-            print(f"  Symmetric move - All choose Type B:")
-            print(f"    Admission rate: {corner_analysis['P_B_symmetric']:.3f}")
-            print(f"    Expected payoff: {corner_analysis['E_B_symmetric']:.3f}")
-            print(f"  Symmetric move - All choose Type C:")
-            print(f"    Admission rate: {corner_analysis['P_C_symmetric']:.3f}")
-            print(f"    Expected payoff: {corner_analysis['E_C_symmetric']:.3f}")
-            
-            print(f"\n  Preferred corner solution: {corner_analysis['preferred_corner']}")
-            print(f"  Equilibrium type: {corner_analysis['equilibrium_type']}")
-            print(f"  Admission rate at equilibrium: {corner_analysis['admission_rate']:.3f}")
-            print(f"  Expected payoff at equilibrium: {corner_analysis['expected_payoff']:.3f}")
-            
-            # Asymmetric move analysis
-            threshold = corner_analysis['threshold_analysis']
-            print(f"\n  Asymmetric move analysis:")
-            print(f"    Threshold ratio V_B/V_C = {threshold['threshold_ratio']:.3f}")
-            print(f"    Is switching rational? {not threshold['hard_to_achieve']}")
-            
-            equilibrium_type = corner_analysis['equilibrium_type']
-            
-            # Provide value adjustment suggestions
-            suggestions = self.suggest_value_adjustment(mse_analysis['K'])
-            print(f"\n  Value Adjustment Suggestions:")
-            print(f"    Issue: {suggestions['issue']}")
-            print(f"    Current: {suggestions['current_range']}")
-            print(f"    Suggestion: {suggestions['suggestion']}")
-        
-        # Summary
-        print("\n" + "=" * 60)
-        print("SUMMARY")
-        print("=" * 60)
-        
-        summary = {
-            'group_A': group_A_results,
-            'mse_analysis': mse_analysis,
-            'equilibrium_type': equilibrium_type,
-            'parameters': {
-                'N': self.N,
-                'S': self.S,
-                'n_A': self.n_A,
-                'n_B': self.n_B,
-                'V_A': self.V_A,
-                'V_B': self.V_B,
-                'V_C': self.V_C,
-                'S_A': self.S_A,
-                'S_B': self.S_B,
-                'S_C': self.S_C
-            }
+        results['group_B'] = {
+            'equilibrium_type': 'MSE',
+            'f': f,
+            'P_B': P_B,
+            'P_C': P_C,
+            'E_B': E_B,
+            'E_C': E_C
         }
         
-        if mse_analysis['mse_exists']:
-            summary['group_B'] = {
-                'equilibrium_type': 'MSE',
-                'f_equilibrium': mse_analysis['f_equilibrium'],
-                'admission_rate_B': mse_analysis['P_B'],
-                'admission_rate_C': mse_analysis['P_C'],
-                'expected_payoff_B': mse_analysis['E_B'],
-                'expected_payoff_C': mse_analysis['E_C']
-            }
-            print(f"✅ Equilibrium Type: Mixed Strategy Equilibrium (MSE)")
-            print(f"   Fraction choosing Type B: {mse_analysis['f_equilibrium']:.3f}")
-            print(f"   Expected payoff (both types): ~{mse_analysis['E_B']:.3f}")
+    else:
+        st.error(f"❌ MSE DOES NOT EXIST (K = {K:.3f} is outside range)")
+        
+        # Analyze corner solutions
+        st.subheader("Corner Solution Analysis")
+        
+        # Symmetric move analysis
+        P_B_all = min(1.0, S_B / n_B)
+        E_B_all = P_B_all * V_B
+        
+        P_C_all = min(1.0, S_C / n_B)
+        E_C_all = P_C_all * V_C
+        
+        # Determine which corner is better
+        if E_B_all > E_C_all:
+            preferred = "Type B"
+            equilibrium_type = "corner_B"
+            admission_rate = P_B_all
+            expected_payoff = E_B_all
+        elif E_C_all > E_B_all:
+            preferred = "Type C"
+            equilibrium_type = "corner_C"
+            admission_rate = P_C_all
+            expected_payoff = E_C_all
         else:
-            summary['group_B'] = {
-                'equilibrium_type': corner_analysis['equilibrium_type'],
-                'preferred_corner': corner_analysis['preferred_corner'],
-                'admission_rate': corner_analysis['admission_rate'],
-                'expected_payoff': corner_analysis['expected_payoff']
-            }
-            print(f"📊 Equilibrium Type: Corner Solution ({corner_analysis['equilibrium_type']})")
-            print(f"   Preferred choice: {corner_analysis['preferred_corner']}")
-            print(f"   Admission rate: {corner_analysis['admission_rate']:.3f}")
-            print(f"   Expected payoff: {corner_analysis['expected_payoff']:.3f}")
+            preferred = "Indifferent"
+            equilibrium_type = "multiple"
+            admission_rate = P_B_all
+            expected_payoff = E_B_all
         
-        return summary
-    
-    def visualize_analysis(self, summary: Dict):
-        """Create visualizations of the analysis results."""
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-        fig.suptitle('JUPAS Competition Analysis', fontsize=16)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**All choose Type B:**")
+            st.markdown(f"- Admission rate: {P_B_all:.3f}")
+            st.markdown(f"- Expected payoff: {E_B_all:.3f}")
         
-        # Plot 1: Group sizes and seat distribution
-        ax1 = axes[0, 0]
-        groups = ['Group A', 'Group B']
-        group_sizes = [self.n_A, self.n_B]
-        seats_by_group = [self.S_A, min(self.S_B + self.S_C, self.n_B)]
+        with col2:
+            st.markdown("**All choose Type C:**")
+            st.markdown(f"- Admission rate: {P_C_all:.3f}")
+            st.markdown(f"- Expected payoff: {E_C_all:.3f}")
         
-        x = np.arange(len(groups))
-        width = 0.35
+        st.info(f"**Preferred corner:** {preferred}")
+        st.info(f"**Admission rate:** {admission_rate:.3f}")
+        st.info(f"**Expected payoff:** {expected_payoff:.3f}")
         
-        ax1.bar(x - width/2, group_sizes, width, label='Applicants', color='skyblue')
-        ax1.bar(x + width/2, seats_by_group, width, label='Available Seats', color='lightcoral')
+        # Asymmetric move analysis
+        st.subheader("Asymmetric Move Analysis")
         
-        ax1.set_xlabel('Group')
-        ax1.set_ylabel('Count')
-        ax1.set_title('Applicants vs Available Seats by Group')
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(groups)
-        ax1.legend()
+        threshold_ratio = V_B / V_C
+        # For a switch to be rational: P_C > threshold_ratio × P_B
         
-        # Plot 2: Programme values
-        ax2 = axes[0, 1]
-        programme_types = ['Type A', 'Type B', 'Type C']
-        values = [self.V_A, self.V_B, self.V_C]
+        # Quick check at boundaries
+        x_small = 1
+        P_B_small = min(1.0, S_B / (n_B - x_small))
+        P_C_small = min(1.0, S_C / x_small)
         
-        bars = ax2.bar(programme_types, values, color=['gold', 'silver', 'brown'])
-        ax2.set_xlabel('Programme Type')
-        ax2.set_ylabel('Value')
-        ax2.set_title('Programme Values')
+        x_half = n_B // 2
+        P_B_half = min(1.0, S_B / (n_B - x_half))
+        P_C_half = min(1.0, S_C / x_half)
         
-        # Add value labels on bars
-        for bar, value in zip(bars, values):
-            height = bar.get_height()
-            ax2.text(bar.get_x() + bar.get_width()/2., height + 0.05,
-                    f'{value:.1f}', ha='center', va='bottom')
+        condition_small = P_C_small > threshold_ratio * P_B_small
+        condition_half = P_C_half > threshold_ratio * P_B_half
         
-        # Plot 3: Seat distribution
-        ax3 = axes[1, 0]
-        seat_counts = [self.S_A, self.S_B, self.S_C]
-        colors = ['gold', 'silver', 'brown']
+        st.markdown(f"**Threshold ratio:** {threshold_ratio:.3f} (V_B/V_C)")
+        st.markdown(f"**Condition at x=1:** P_C({P_C_small:.3f}) > {threshold_ratio:.3f} × P_B({P_B_small:.3f}) = {condition_small}")
+        st.markdown(f"**Condition at x=n_B/2:** P_C({P_C_half:.3f}) > {threshold_ratio:.3f} × P_B({P_B_half:.3f}) = {condition_half}")
         
-        ax3.pie(seat_counts, labels=programme_types, autopct='%1.1f%%',
-                colors=colors, startangle=90)
-        ax3.set_title('Seat Distribution by Programme Type')
+        if not (condition_small or condition_half):
+            st.markdown("**Conclusion:** Switching to Type C is hard to rationalize")
         
-        # Plot 4: K-value analysis for MSE
-        ax4 = axes[1, 1]
-        K = self.V_B / self.V_C
-        K_range = np.linspace(0.5, 2.0, 100)
-        mse_region = (K_range > 0.75) & (K_range < 4/3)
+        # Value adjustment suggestions
+        st.subheader("Value Adjustment Suggestions")
         
-        ax4.axvspan(0.75, 4/3, alpha=0.3, color='green', label='MSE Region')
-        ax4.axvline(K, color='red', linestyle='--', linewidth=2, label=f'Current K = {K:.3f}')
-        ax4.axvline(0.75, color='black', linestyle=':', linewidth=1, label='K lower bound')
-        ax4.axvline(4/3, color='black', linestyle=':', linewidth=1, label='K upper bound')
-        
-        ax4.set_xlabel('K = V_B / V_C')
-        ax4.set_ylabel('MSE Feasibility')
-        ax4.set_title('Mixed Strategy Equilibrium Region')
-        ax4.legend()
-        ax4.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.show()
-
-
-def interactive_analysis():
-    """Interactive function to run the analyzer with custom parameters."""
-    analyzer = JUPASAnalyzer()
-    
-    print("Welcome to the JUPAS Competition Analyzer!")
-    print("\nDefault parameters:")
-    print(f"  Total applicants: {analyzer.N:,}")
-    print(f"  Total seats: {analyzer.S:,}")
-    print(f"  Group A proportion: {analyzer.group_A_prop:.1%}")
-    print(f"  Programme values: A={analyzer.V_A}, B={analyzer.V_B}, C={analyzer.V_C}")
-    
-    while True:
-        print("\n" + "="*50)
-        print("Options:")
-        print("1. Run analysis with current parameters")
-        print("2. Modify parameters")
-        print("3. Reset to default")
-        print("4. Exit")
-        
-        choice = input("\nEnter your choice (1-4): ").strip()
-        
-        if choice == '1':
-            try:
-                summary = analyzer.full_analysis()
-                visualize = input("\nGenerate visualizations? (y/n): ").lower()
-                if visualize == 'y':
-                    analyzer.visualize_analysis(summary)
-            except ValueError as e:
-                print(f"Error: {e}")
-        
-        elif choice == '2':
-            print("\nEnter new parameters (press Enter to keep current value):")
+        if K <= K_lower:
+            target_K = (K_lower + K_upper) / 2
+            required_V_B = target_K * V_C
+            required_V_C = V_B / target_K
             
-            try:
-                N = input(f"Total applicants [{analyzer.N}]: ").strip()
-                if N:
-                    analyzer.N = int(N)
-                
-                S = input(f"Total seats [{analyzer.S}]: ").strip()
-                if S:
-                    analyzer.S = int(S)
-                
-                group_A = input(f"Group A proportion [{analyzer.group_A_prop:.2f}]: ").strip()
-                if group_A:
-                    analyzer.group_A_prop = float(group_A)
-                
-                V_A = input(f"Value of Type A programmes [{analyzer.V_A}]: ").strip()
-                if V_A:
-                    analyzer.V_A = float(V_A)
-                
-                V_B = input(f"Value of Type B programmes [{analyzer.V_B}]: ").strip()
-                if V_B:
-                    analyzer.V_B = float(V_B)
-                
-                V_C = input(f"Value of Type C programmes [{analyzer.V_C}]: ").strip()
-                if V_C:
-                    analyzer.V_C = float(V_C)
-                
-                # Recalculate seat proportions if needed
-                analyzer._calculate_derived_quantities()
-                
-                print("Parameters updated successfully!")
-                
-            except ValueError as e:
-                print(f"Invalid input: {e}")
+            st.markdown(f"**Issue:** K = {K:.3f} ≤ {K_lower:.3f} (too low)")
+            st.markdown("**To achieve MSE:**")
+            st.markdown(f"- Increase V_B to at least **{required_V_B:.2f}**")
+            st.markdown(f"- Or decrease V_C to at most **{required_V_C:.2f}**")
+            
+        elif K >= K_upper:
+            target_K = (K_lower + K_upper) / 2
+            required_V_B = target_K * V_C
+            required_V_C = V_B / target_K
+            
+            st.markdown(f"**Issue:** K = {K:.3f} ≥ {K_upper:.3f} (too high)")
+            st.markdown("**To achieve MSE:**")
+            st.markdown(f"- Decrease V_B to at most **{required_V_B:.2f}**")
+            st.markdown(f"- Or increase V_C to at least **{required_V_C:.2f}**")
         
-        elif choice == '3':
-            analyzer.reset_parameters()
-            print("Parameters reset to default values.")
+        results['group_B'] = {
+            'equilibrium_type': equilibrium_type,
+            'preferred_corner': preferred,
+            'admission_rate': admission_rate,
+            'expected_payoff': expected_payoff,
+            'K': K,
+            'K_lower': K_lower,
+            'K_upper': K_upper
+        }
+    
+    return results
+
+# Run analysis with current parameters
+params = st.session_state.params
+
+try:
+    results = analyze_jupas(
+        params['N'], params['S'], params['group_A_prop'],
+        params['V_A'], params['V_B'], params['V_C'],
+        params['seat_prop_A'], params['seat_prop_B'], params['seat_prop_C']
+    )
+    
+    # Summary section
+    if results:
+        st.header("Summary")
         
-        elif choice == '4':
-            print("Exiting...")
-            break
-        
+        if results['group_B'].get('equilibrium_type') == 'MSE':
+            st.success(f"**Equilibrium Type:** Mixed Strategy Equilibrium")
+            st.info(f"**Fraction choosing Type B:** {results['group_B']['f']:.3f}")
+            st.info(f"**Expected payoff for Group B:** ~{results['group_B']['E_B']:.3f}")
         else:
-            print("Invalid choice. Please try again.")
+            st.info(f"**Equilibrium Type:** Corner Solution ({results['group_B']['equilibrium_type']})")
+            st.info(f"**Preferred choice:** {results['group_B']['preferred_corner']}")
+            st.info(f"**Expected payoff for Group B:** {results['group_B']['expected_payoff']:.3f}")
+        
+        st.info(f"**Expected payoff for Group A:** {results['group_A']['expected_payoff']:.3f}")
+        
+except Exception as e:
+    st.error(f"Error in analysis: {str(e)}")
 
+# Quick analysis examples
+st.sidebar.header("Quick Examples")
+if st.sidebar.button("Situation 4 (Default)"):
+    st.session_state.params = {
+        'N': 10000, 'S': 9000, 'group_A_prop': 0.3,
+        'V_A': 3.0, 'V_B': 2.0, 'V_C': 1.0,
+        'seat_prop_A': 1/3, 'seat_prop_B': 1/3, 'seat_prop_C': 1/3
+    }
+    st.rerun()
 
-# Example usage
-if __name__ == "__main__":
-    # Create analyzer instance
-    analyzer = JUPASAnalyzer()
-    
-    # Example 1: Run with default parameters (Situation 4)
-    print("EXAMPLE 1: Default Parameters (Situation 4)")
-    summary1 = analyzer.full_analysis()
-    
-    # Example 2: Modify parameters for MSE (Situation 5)
-    print("\n" + "="*60)
-    print("EXAMPLE 2: Modified Parameters for MSE (Situation 5)")
-    analyzer.set_parameters(V_B=1.2, V_C=1.0)  # K = 1.2, within MSE range
-    summary2 = analyzer.full_analysis()
-    
-    # Example 3: Interactive analysis
-    print("\n" + "="*60)
-    print("Starting Interactive Analysis...")
-    interactive_analysis()
+if st.sidebar.button("Situation 5 (MSE Example)"):
+    st.session_state.params = {
+        'N': 10000, 'S': 9000, 'group_A_prop': 0.3,
+        'V_A': 3.0, 'V_B': 1.2, 'V_C': 1.0,  # K = 1.2, within MSE range
+        'seat_prop_A': 1/3, 'seat_prop_B': 1/3, 'seat_prop_C': 1/3
+    }
+    st.rerun()
+
+if st.sidebar.button("High Competition"):
+    st.session_state.params = {
+        'N': 15000, 'S': 9000, 'group_A_prop': 0.4,
+        'V_A': 5.0, 'V_B': 3.0, 'V_C': 1.5,
+        'seat_prop_A': 0.4, 'seat_prop_B': 0.4, 'seat_prop_C': 0.2
+    }
+    st.rerun()
+
+# Display current parameters
+with st.sidebar.expander("Current Parameters"):
+    st.json(st.session_state.params)
