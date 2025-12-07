@@ -7,18 +7,12 @@ st.title("JUPAS Game Theory: Fair Seat Allocation and Payoff Analysis")
 st.header("Input Parameters")
 
 N = st.number_input("Total number of students (N)", min_value=1, value=1000)
-S = st.number_input("Total number of seats (S)", min_value=1, value=900)
-
 num_group_A = st.number_input("Number of Group A students", min_value=0, max_value=N, value=300)
 num_group_B = N - num_group_A
 
-seats_type_A = st.number_input("Seats in Type A", min_value=0, max_value=S, value=270)
-seats_type_B = st.number_input("Seats in Type B", min_value=0, max_value=S, value=360)
-seats_type_C = S - seats_type_A - seats_type_B
-
-if seats_type_C < 0:
-    st.error("Sum of Type A and B seats cannot exceed total seats.")
-    st.stop()
+seats_type_A = st.number_input("Seats in Type A", min_value=0, value=270)
+seats_type_B = st.number_input("Seats in Type B", min_value=0, value=360)
+seats_type_C = st.number_input("Seats in Type C", min_value=0, value=270)
 
 # --- Preference Section ---
 st.header("Preference and Payoff Matrix")
@@ -38,20 +32,16 @@ payoff_matrix = {
 }
 
 # --- Allocation Algorithm ---
-# Each group applies for their most preferred available programme, then next, etc.
-
-# Define group preferences (from highest to lowest)
 group_A_pref = sorted(payoff_matrix['A'], key=payoff_matrix['A'].get, reverse=True)
 group_B_pref = sorted(payoff_matrix['B'], key=payoff_matrix['B'].get, reverse=True)
 
-# Initialize seat availability
 seats = {'Type A': seats_type_A, 'Type B': seats_type_B, 'Type C': seats_type_C}
 allocation = {
     'A': {'Type A': 0, 'Type B': 0, 'Type C': 0},
     'B': {'Type A': 0, 'Type B': 0, 'Type C': 0}
 }
 
-# Allocate for Group A first (change order if you want to simulate different priorities)
+# Allocate for Group A first
 remaining_A = num_group_A
 for prog in group_A_pref:
     alloc = min(remaining_A, seats[prog])
@@ -86,6 +76,23 @@ st.write(f"**Group A total payoff:** {payoff_A}")
 st.write(f"**Group B total payoff:** {payoff_B}")
 st.write(f"**Total system payoff:** {total_payoff}")
 
+# 3. Mixed Strategy Equilibrium (MSE) Analysis
+st.subheader("Mixed Strategy Equilibrium (MSE) Analysis")
+
+# Calculate frequencies (probabilities) for each group
+freq_A = {prog: allocation['A'][prog] / num_group_A if num_group_A > 0 else 0 for prog in allocation['A']}
+freq_B = {prog: allocation['B'][prog] / num_group_B if num_group_B > 0 else 0 for prog in allocation['B']}
+
+st.markdown("**Group A frequency of allocation:**")
+st.write(pd.DataFrame([freq_A], index=["Frequency"]))
+
+st.markdown("**Group B frequency of allocation:**")
+st.write(pd.DataFrame([freq_B], index=["Frequency"]))
+
+st.markdown("""
+- The frequency for each programme is the proportion of students in that group allocated to that programme.
+- The sum of frequencies for each group may be less than 1 if not all students are allocated a seat.
+""")
+
 st.markdown("---")
 st.markdown("You can change the payoff values above to see how the analysis changes.")
-
