@@ -1,84 +1,103 @@
 import streamlit as st
+import pandas as pd
 
-st.title("JUPAS Game Theory Payoff Analysis")
+st.title("JUPAS Game Theory: MSE and Value Range Analysis")
 
-# Sidebar inputs
-st.sidebar.header("Input Parameters")
+# --- Input Section ---
+st.header("Input Parameters")
 
-N = st.sidebar.number_input("Total number of students (N)", min_value=1, value=1000)
-S = st.sidebar.number_input("Total number of seats (S)", min_value=1, value=800)
+num_group_A = st.number_input("Number of Group A students", min_value=0, value=3000)
+num_group_B = st.number_input("Number of Group B students", min_value=0, value=7000)
 
-prop_group_A = st.sidebar.slider("Proportion of Group A students", min_value=0.0, max_value=1.0, value=0.6)
-prop_group_B = 1.0 - prop_group_A
+seats_type_A = st.number_input("Seats in Type A", min_value=0, value=3000)
+seats_type_B = st.number_input("Seats in Type B", min_value=0, value=4200)
+seats_type_C = st.number_input("Seats in Type C", min_value=0, value=2800)
 
-prop_type_A = st.sidebar.slider("Proportion of Type A programme seats", min_value=0.0, max_value=1.0, value=0.5)
-prop_type_B = st.sidebar.slider("Proportion of Type B programme seats", min_value=0.0, max_value=1.0, value=0.3)
-prop_type_C = 1.0 - prop_type_A - prop_type_B
+st.header("Programme Values (Payoff Matrix)")
+payoff_A = st.number_input("Value of Type A Programme", value=3.0, format="%.3f")
+payoff_B = st.number_input("Value of Type B Programme", value=2.0, format="%.3f")
+payoff_C = st.number_input("Value of Type C Programme", value=1.0, format="%.3f")
 
-if prop_type_C < 0:
-    st.error("Proportions of Type A and B seats must add up to less than or equal to 1.")
-    st.stop()
+# --- Step 1: Group A Case ---
+st.subheader("Step 1: Group A Case")
+if num_group_A <= seats_type_A:
+    st.success(f"All {num_group_A} Group A students fill Type A seats.")
+    group_A_allocation = {"Type A": num_group_A, "Type B": 0, "Type C": 0}
+else:
+    st.warning(f"Group A students ({num_group_A}) exceed Type A seats ({seats_type_A}). Only {seats_type_A} can be allocated to Type A.")
+    group_A_allocation = {"Type A": seats_type_A, "Type B": 0, "Type C": 0}
 
-num_group_A = int(N * prop_group_A)
-num_group_B = N - num_group_A
+st.write("Group A allocation:", group_A_allocation)
 
-seats_type_A = int(S * prop_type_A)
-seats_type_B = int(S * prop_type_B)
-seats_type_C = S - seats_type_A - seats_type_B
+# --- Step 2: Group B Case ---
+st.subheader("Step 2: Group B Case")
 
-payoff_matrix = {
-    'A': {'Type A': 3, 'Type B': 2, 'Type C': 1},
-    'B': {'Type A': 1, 'Type B': 3, 'Type C': 2}
-}
+N_B = num_group_B
+S_B = seats_type_B
+S_C = seats_type_C
+v_B = payoff_B
+v_C = payoff_C
 
-def allocate_seats(num_students, seats, payoff):
-    allocation = {'Type A': 0, 'Type B': 0, 'Type C': 0}
-    preferred_type = max(payoff, key=payoff.get)
-    allocated = min(num_students, seats[preferred_type])
-    allocation[preferred_type] = allocated
-    remaining_students = num_students - allocated
-    seats[preferred_type] -= allocated
+# Calculate MSE fraction
+denom = v_B * S_B + v_C * S_C
+x_star = v_B * S_B / denom if denom > 0 else 0
 
-    if remaining_students > 0:
-        types_sorted = sorted(payoff, key=payoff.get, reverse=True)
-        for t in types_sorted:
-            if t == preferred_type:
-                continue
-            alloc = min(remaining_students, seats[t])
-            allocation[t] += alloc
-            seats[t] -= alloc
-            remaining_students -= alloc
-            if remaining_students == 0:
-                break
-    return allocation
+# Calculate admission probabilities at MSE
+admission_prob_B = S_B / (x_star * N_B) if x_star * N_B > 0 else 0
+admission_prob_C = S_C / ((1 - x_star) * N_B) if (1 - x_star) * N_B > 0 else 0
 
-seats = {'Type A': seats_type_A, 'Type B': seats_type_B, 'Type C': seats_type_C}
+# Find value range for which both admission probabilities ≤ 1
+# For Type B: S_B / (x_star * N_B) ≤ 1  =>  x_star ≥ S_B / N_B
+# For Type C: S_C / ((1-x_star) * N_B) ≤ 1  =>  (1-x_star) ≥ S_C / N_B  =>  x_star ≤ 1 - S_C / N_B
 
-alloc_A = allocate_seats(num_group_A, seats.copy(), payoff_matrix['A'])
-alloc_B = allocate_seats(num_group_B, seats.copy(), payoff_matrix['B'])
+lower_bound = S_B / N_B if N_B > 0 else 0
+upper_bound = 1 - (S_C / N_B) if N_B > 0 else 1
 
-def total_payoff(allocation, payoff):
-    return sum(allocation[t] * payoff[t] for t in allocation)
+# Now, x_star = v_B * S_B / (v_B * S_B + v_C * S_C)
+# For MSE to be valid: lower_bound ≤ x_star ≤ upper_bound
 
-payoff_A = total_payoff(alloc_A, payoff_matrix['A'])
-payoff_B = total_payoff(alloc_B, payoff_matrix['B'])
+st.write(f"**Calculated MSE fraction (Type B):** {x_star:.3f}")
+st.write(f"**Admission probability for Type B at MSE:** {admission_prob_B:.3f}")
+st.write(f"**Admission probability for Type C at MSE:** {admission_prob_C:.3f}")
 
-st.subheader("Results")
+st.write(f"**Value range for MSE to be valid:**")
+st.latex(r"\text{lower bound} \leq x^* \leq \text{upper bound}")
+st.write(f"Lower bound: {lower_bound:.3f}")
+st.write(f"Upper bound: {upper_bound:.3f}")
 
-st.write(f"**Group A students:** {num_group_A}")
-st.write(f"**Group B students:** {num_group_B}")
-st.write(f"**Seats in Type A:** {seats_type_A}")
-st.write(f"**Seats in Type B:** {seats_type_B}")
-st.write(f"**Seats in Type C:** {seats_type_C}")
+if lower_bound < upper_bound:
+    if lower_bound <= x_star <= upper_bound:
+        st.success("MSE is valid for current values.")
+        expected_payoff_B = v_B * admission_prob_B
+        expected_payoff_C = v_C * admission_prob_C
+        st.write(f"Fraction of Group B choosing Type B: {x_star:.3f}")
+        st.write(f"Fraction of Group B choosing Type C: {1-x_star:.3f}")
+        st.write(f"Expected payoff for Group B (Type B): {expected_payoff_B:.3f}")
+        st.write(f"Expected payoff for Group B (Type C): {expected_payoff_C:.3f}")
+        df_mse = pd.DataFrame({
+            "Fraction": [x_star, 1-x_star],
+            "Admission Probability": [admission_prob_B, admission_prob_C],
+            "Expected Payoff": [expected_payoff_B, expected_payoff_C]
+        }, index=["Type B", "Type C"])
+        st.dataframe(df_mse)
+    else:
+        st.warning("MSE is NOT valid for current values.")
+        st.write("Corner solution applies:")
+        if x_star < lower_bound:
+            st.info("All Group B students choose Type C.")
+            admission_prob_C = S_C / N_B if N_B > 0 else 0
+            expected_payoff_C = v_C * admission_prob_C
+            st.write(f"Admission probability for Type C: {admission_prob_C:.3f}")
+            st.write(f"Expected payoff for Group B: {expected_payoff_C:.3f}")
+        elif x_star > upper_bound:
+            st.info("All Group B students choose Type B.")
+            admission_prob_B = S_B / N_B if N_B > 0 else 0
+            expected_payoff_B = v_B * admission_prob_B
+            st.write(f"Admission probability for Type B: {admission_prob_B:.3f}")
+            st.write(f"Expected payoff for Group B: {expected_payoff_B:.3f}")
+        st.write(f"To have MSE, adjust programme values so that {lower_bound:.3f} ≤ x* ≤ {upper_bound:.3f} (Type A > Type B > Type C).")
+else:
+    st.error("No valid value range for MSE (upper bound < lower bound). Check your seat and group numbers.")
 
-st.write("### Allocation")
-st.write("**Group A allocation:**", alloc_A)
-st.write("**Group B allocation:**", alloc_B)
-
-st.write("### Payoffs")
-st.write(f"**Group A total payoff:** {payoff_A}")
-st.write(f"**Group B total payoff:** {payoff_B}")
-st.write(f"**Total system payoff:** {payoff_A + payoff_B}")
-
-st.write("---")
-st.write("Adjust the sliders in the sidebar to explore different scenarios!")
+st.markdown("---")
+st.markdown("You can adjust the values and seat numbers to see how the equilibrium and value range change.")
