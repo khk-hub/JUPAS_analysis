@@ -1,84 +1,91 @@
 import streamlit as st
+import pandas as pd
 
-st.title("JUPAS Game Theory Payoff Analysis")
+st.title("JUPAS Game Theory: Fair Seat Allocation and Payoff Analysis")
 
-# Sidebar inputs
-st.sidebar.header("Input Parameters")
+# --- Input Section ---
+st.header("Input Parameters")
 
-N = st.sidebar.number_input("Total number of students (N)", min_value=1, value=1000)
-S = st.sidebar.number_input("Total number of seats (S)", min_value=1, value=800)
+N = st.number_input("Total number of students (N)", min_value=1, value=1000)
+S = st.number_input("Total number of seats (S)", min_value=1, value=900)
 
-prop_group_A = st.sidebar.slider("Proportion of Group A students", min_value=0.0, max_value=1.0, value=0.6)
-prop_group_B = 1.0 - prop_group_A
-
-prop_type_A = st.sidebar.slider("Proportion of Type A programme seats", min_value=0.0, max_value=1.0, value=0.5)
-prop_type_B = st.sidebar.slider("Proportion of Type B programme seats", min_value=0.0, max_value=1.0, value=0.3)
-prop_type_C = 1.0 - prop_type_A - prop_type_B
-
-if prop_type_C < 0:
-    st.error("Proportions of Type A and B seats must add up to less than or equal to 1.")
-    st.stop()
-
-num_group_A = int(N * prop_group_A)
+num_group_A = st.number_input("Number of Group A students", min_value=0, max_value=N, value=300)
 num_group_B = N - num_group_A
 
-seats_type_A = int(S * prop_type_A)
-seats_type_B = int(S * prop_type_B)
+seats_type_A = st.number_input("Seats in Type A", min_value=0, max_value=S, value=270)
+seats_type_B = st.number_input("Seats in Type B", min_value=0, max_value=S, value=360)
 seats_type_C = S - seats_type_A - seats_type_B
 
+if seats_type_C < 0:
+    st.error("Sum of Type A and B seats cannot exceed total seats.")
+    st.stop()
+
+# --- Preference Section ---
+st.header("Preference and Payoff Matrix")
+
+st.markdown("#### Set the value (payoff) for each group-programme combination:")
+
+payoff_A_A = st.number_input("Group A value for Type A", value=3)
+payoff_A_B = st.number_input("Group A value for Type B", value=2)
+payoff_A_C = st.number_input("Group A value for Type C", value=1)
+payoff_B_A = st.number_input("Group B value for Type A", value=1)
+payoff_B_B = st.number_input("Group B value for Type B", value=3)
+payoff_B_C = st.number_input("Group B value for Type C", value=2)
+
 payoff_matrix = {
-    'A': {'Type A': 3, 'Type B': 2, 'Type C': 1},
-    'B': {'Type A': 1, 'Type B': 3, 'Type C': 2}
+    'A': {'Type A': payoff_A_A, 'Type B': payoff_A_B, 'Type C': payoff_A_C},
+    'B': {'Type A': payoff_B_A, 'Type B': payoff_B_B, 'Type C': payoff_B_C}
 }
 
-def allocate_seats(num_students, seats, payoff):
-    allocation = {'Type A': 0, 'Type B': 0, 'Type C': 0}
-    preferred_type = max(payoff, key=payoff.get)
-    allocated = min(num_students, seats[preferred_type])
-    allocation[preferred_type] = allocated
-    remaining_students = num_students - allocated
-    seats[preferred_type] -= allocated
+# --- Allocation Algorithm ---
+# Each group applies for their most preferred available programme, then next, etc.
 
-    if remaining_students > 0:
-        types_sorted = sorted(payoff, key=payoff.get, reverse=True)
-        for t in types_sorted:
-            if t == preferred_type:
-                continue
-            alloc = min(remaining_students, seats[t])
-            allocation[t] += alloc
-            seats[t] -= alloc
-            remaining_students -= alloc
-            if remaining_students == 0:
-                break
-    return allocation
+# Define group preferences (from highest to lowest)
+group_A_pref = sorted(payoff_matrix['A'], key=payoff_matrix['A'].get, reverse=True)
+group_B_pref = sorted(payoff_matrix['B'], key=payoff_matrix['B'].get, reverse=True)
 
+# Initialize seat availability
 seats = {'Type A': seats_type_A, 'Type B': seats_type_B, 'Type C': seats_type_C}
+allocation = {
+    'A': {'Type A': 0, 'Type B': 0, 'Type C': 0},
+    'B': {'Type A': 0, 'Type B': 0, 'Type C': 0}
+}
 
-alloc_A = allocate_seats(num_group_A, seats.copy(), payoff_matrix['A'])
-alloc_B = allocate_seats(num_group_B, seats.copy(), payoff_matrix['B'])
+# Allocate for Group A first (change order if you want to simulate different priorities)
+remaining_A = num_group_A
+for prog in group_A_pref:
+    alloc = min(remaining_A, seats[prog])
+    allocation['A'][prog] = alloc
+    seats[prog] -= alloc
+    remaining_A -= alloc
 
-def total_payoff(allocation, payoff):
-    return sum(allocation[t] * payoff[t] for t in allocation)
+# Then allocate for Group B
+remaining_B = num_group_B
+for prog in group_B_pref:
+    alloc = min(remaining_B, seats[prog])
+    allocation['B'][prog] = alloc
+    seats[prog] -= alloc
+    remaining_B -= alloc
 
-payoff_A = total_payoff(alloc_A, payoff_matrix['A'])
-payoff_B = total_payoff(alloc_B, payoff_matrix['B'])
+# --- Output Section ---
+st.header("Result Analysis")
 
-st.subheader("Results")
+# 1. Absolute Programme Value (number of students in each programme by group)
+st.subheader("Absolute Programme Allocation")
+df_alloc = pd.DataFrame(allocation).T
+st.dataframe(df_alloc)
 
-st.write(f"**Group A students:** {num_group_A}")
-st.write(f"**Group B students:** {num_group_B}")
-st.write(f"**Seats in Type A:** {seats_type_A}")
-st.write(f"**Seats in Type B:** {seats_type_B}")
-st.write(f"**Seats in Type C:** {seats_type_C}")
+# 2. Payoff Analysis
+st.subheader("Payoff Analysis (using current values)")
 
-st.write("### Allocation")
-st.write("**Group A allocation:**", alloc_A)
-st.write("**Group B allocation:**", alloc_B)
+payoff_A = sum(allocation['A'][prog] * payoff_matrix['A'][prog] for prog in allocation['A'])
+payoff_B = sum(allocation['B'][prog] * payoff_matrix['B'][prog] for prog in allocation['B'])
+total_payoff = payoff_A + payoff_B
 
-st.write("### Payoffs")
 st.write(f"**Group A total payoff:** {payoff_A}")
 st.write(f"**Group B total payoff:** {payoff_B}")
-st.write(f"**Total system payoff:** {payoff_A + payoff_B}")
+st.write(f"**Total system payoff:** {total_payoff}")
 
-st.write("---")
-st.write("Adjust the sliders in the sidebar to explore different scenarios!")
+st.markdown("---")
+st.markdown("You can change the payoff values above to see how the analysis changes.")
+
